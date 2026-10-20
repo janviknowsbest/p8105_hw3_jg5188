@@ -18,7 +18,7 @@ dim(ny_noaa)
 str(ny_noaa)
 head(ny_noaa)
 ```
-#now I shall check missing values
+now I shall check missing values
 ```{r noaa-missingness}
 data.frame(
   variable = names(ny_noaa),
@@ -29,7 +29,7 @@ data.frame(
 )
 ```
 The Station IDs and dates are complete, however the missingness varies across weather measurements. The temprature analyses exclude many records because almost 44% of the temprature observations are missing.This table does not reveal why that is or whether missingness differs across stations or years.
-## Problem 2
+
 ### Data cleaning
 
 ```{r clean-noaa}
@@ -58,4 +58,260 @@ noaa_clean |>
   )
 ```
 The most commonly observed snowfall value is 0 mm. It has 2008508 observations which shows the most recorded station-days had no snowfall. The most frequent positive valaues include 25, 13, 51, and 76 mm. The amounts are about 1,0.5,2, and 3 inches - respectively. This suggests that measurements originally recorded in inches were converted and rounded to mm. This is consistent with the US snowfall reporting practices that measure new snowfall to the nearest tenth of an inch.
+### January and July maximum temperatures
+
+```{r monthly-temperature, fig.width=10, fig.height=5}
+station_temp = noaa_clean |>
+  filter(month %in% c(1, 7)) |>
+  group_by(id, year, month) |>
+  summarise(
+    mean_tmax = mean(tmax, na.rm = TRUE),
+    observed_days = sum(!is.na(tmax)),
+    .groups = "drop"
+  ) |>
+  mutate(
+    month = factor(
+      month,
+      levels = c(1, 7),
+      labels = c("January", "July")
+    )
+  )
+
+station_temp |>
+  filter(observed_days > 0) |>
+  ggplot(aes(x = year, y = mean_tmax)) +
+  geom_point(alpha = 0.2, size = 0.7, color = "steelblue") +
+  facet_wrap(~ month, nrow = 1) +
+  labs(
+    title = "Average daily maximum temperature by station and year",
+    subtitle = "Each point represents one station in one year",
+    x = "Year",
+    y = "Mean maximum temperature (°C)"
+  ) +
+  theme_minimal(base_size = 12)
+```
+July's avg. max. temperatures are a lot higher than January's, showing a clear seasonal difference. Most station-year averages falls roughly between 20 and 32 degrees Celsius in July, while January values are between -10 and 10 degrees celsius. Both the panels show differences across stations and years, and january appears to have larger year-to-year shifts. A few July observations lie below the main cluster, including one near 14 degrees celsius. These are potential outliers that warrant further investigation rather than automatic removal.
+### Temperature relationship and snowfall distributions
+
+```{r temperature-snowfall, fig.width=14, fig.height=6}
+library(patchwork)
+
+temperature_plot = noaa_clean |>
+  filter(!is.na(tmin), !is.na(tmax)) |>
+  ggplot(aes(x = tmin, y = tmax)) +
+  geom_bin_2d(bins = 70) +
+  scale_fill_viridis_c(trans = "log10") +
+  labs(
+    title = "Daily minimum and maximum temperatures",
+    x = "Minimum temperature (°C)",
+    y = "Maximum temperature (°C)",
+    fill = "Count\n(log scale)"
+  ) +
+  theme_minimal(base_size = 11)
+
+snowfall_plot = noaa_clean |>
+  filter(snow > 0, snow < 100) |>
+  ggplot(aes(x = factor(year), y = snow)) +
+  geom_violin(
+    fill = "lightblue",
+    color = "steelblue",
+    scale = "width",
+    trim = TRUE
+  ) +
+  labs(
+    title = "Snowfall distributions by year",
+    subtitle = "Only observations with 0 < snowfall < 100 mm",
+    x = "Year",
+    y = "Snowfall (mm)"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+  )
+
+temperature_plot | snowfall_plot
+```
+The daily min and max tempratures have a strong psotive association. The days with higher min temp generally also have higher max temps. Most observations form a dense diagonak band, with a few isolated extreme values and some records where the max appears lower than the min. These unusual obsrvations warrant investigation before drawing any conclusions.
+
+Among observations with snowfall greater than 0 but less than 100 mm, smaller snowfall amounts are more common, and the distributions have broadly similar shapes across years. Repeated peaks occur around values such as 25, 51, and 76 mm, consistent with the frequently observed amounts identified earlier. There is no obvious systematic shift over time in these restricted distributions. This figure excludes days with zero snowfall and amounts of 100 mm or more. This does not describe overall snowfall frequency or total annual snowfall.
+## Problem 2
+### Import and inspect the data
+
+```{r import-nhanes}
+nhanes_covar = read_csv(
+  "data/nhanes_covar.csv",
+  skip = 4,
+  na = c("", "NA"),
+  show_col_types = FALSE
+)
+
+nhanes_accel = read_csv(
+  "data/nhanes_accel.csv",
+  show_col_types = FALSE
+)
+
+dim(nhanes_covar)
+head(nhanes_covar)
+
+dim(nhanes_accel)
+names(nhanes_accel)[1:6]
+```
+### Clean and combine the data
+
+```{r clean-nhanes}
+covar_clean = nhanes_covar |>
+  drop_na(SEQN, sex, age, BMI, education) |>
+  filter(age >= 21) |>
+  mutate(
+    sex = factor(
+      sex,
+      levels = c(1, 2),
+      labels = c("Male", "Female")
+    ),
+    education = factor(
+      education,
+      levels = c(1, 2, 3),
+      labels = c(
+        "Less than high school",
+        "High school equivalent",
+        "More than high school"
+      )
+    )
+  )
+
+accel_long = nhanes_accel |>
+  pivot_longer(
+    cols = starts_with("min"),
+    names_to = "minute",
+    names_prefix = "min",
+    names_transform = list(minute = as.integer),
+    values_to = "mims"
+  ) |>
+  mutate(
+    hour = (minute - 1) / 60
+  )
+
+nhanes_clean = covar_clean |>
+  inner_join(accel_long, by = "SEQN")
+
+nhanes_clean |>
+  summarise(
+    participants = n_distinct(SEQN),
+    observations = n(),
+    missing_activity = sum(is.na(mims))
+  )
+```
+After excluding participants younger than 21 and those with missing demographic information, the merged dataset contains 228 participants and 328,320 minute-level observations. Each participant contributes 1,440 minutes of activity data, and no activity measurements are missing in the retained sample.
+### Participants by sex and education
+
+```{r education-sex-table}
+covar_clean |>
+  count(education, sex, .drop = FALSE) |>
+  pivot_wider(
+    names_from = sex,
+    values_from = n,
+    values_fill = 0
+  ) |>
+  knitr::kable(
+    col.names = c("Education level", "Men", "Women"),
+    caption = "Number of participants by education level and sex"
+  )
+```
+Participants with more than a high school education make up the largest group, with 115 participants. The less-than-high-school group has nearly equal numbers of men and women (27 and 28), as does the more-than-high-school group (56 and 59). In contrast, the high-school-equivalent group contains more men than women (35 vs. 23).
+```{r age-distributions, fig.width=11, fig.height=5}
+covar_clean |>
+  ggplot(aes(x = sex, y = age, fill = sex)) +
+  geom_boxplot(width = 0.5, outlier.shape = NA) +
+  geom_jitter(
+    width = 0.12,
+    height = 0,
+    alpha = 0.5,
+    size = 1.2
+  ) +
+  facet_wrap(~ education, nrow = 1) +
+  scale_fill_manual(
+    values = c("Male" = "#0072B2", "Female" = "#D55E00")
+  ) +
+  labs(
+    title = "Age distributions by sex and education level",
+    x = "Sex",
+    y = "Age (years)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none")
+```
+Participants with more than a high school education tend to be younger than those in the other education categories. In the less-than-high-school group, men and women have similar median ages, around 60 years. Among participants with a high school equivalent education, women have a higher median age than men, approximately 62 versus 53 years. Age distributions overlap substantially across sexes within all three education categories.
+### Total daily activity and age
+
+```{r total-activity, fig.width=11, fig.height=5}
+daily_activity = nhanes_clean |>
+  group_by(SEQN, sex, age, BMI, education) |>
+  summarise(
+    total_activity = sum(mims),
+    .groups = "drop"
+  )
+
+daily_activity |>
+  ggplot(aes(x = age, y = total_activity, color = sex)) +
+  geom_point(alpha = 0.65, size = 1.5) +
+  geom_smooth(
+    method = "loess",
+    formula = y ~ x,
+    se = FALSE
+  ) +
+  facet_wrap(~ education, nrow = 1) +
+  scale_color_manual(
+    values = c("Male" = "#0072B2", "Female" = "#D55E00")
+  ) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    title = "Total daily activity by age, sex, and education",
+    x = "Age (years)",
+    y = "Total daily activity (sum of minute-level MIMS)",
+    color = "Sex"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+Total daily activity generally declines at older ages across all three education categories, although the relationships are not strictly linear. Among participants with less than a high school education, both sexes show a substantial decline toward older ages. Women’s fitted activity levels exceed men’s across much of the age range in the high-school-equivalent and more-than-high-school groups. However, there is considerable individual variation and overlap between sexes, so these curves describe patterns in this sample rather than establishing causal effects.
+### Activity patterns over the day
+
+```{r daily-activity-patterns, fig.width=11, fig.height=5}
+activity_by_minute = nhanes_clean |>
+  group_by(education, sex, minute, hour) |>
+  summarise(
+    mean_mims = mean(mims),
+    .groups = "drop"
+  )
+
+activity_by_minute |>
+  ggplot(aes(x = hour, y = mean_mims, color = sex)) +
+  geom_line(alpha = 0.3, linewidth = 0.3) +
+  geom_smooth(
+    method = "loess",
+    formula = y ~ x,
+    span = 0.15,
+    se = FALSE,
+    linewidth = 1
+  ) +
+  facet_wrap(~ education, nrow = 1) +
+  scale_color_manual(
+    values = c("Male" = "#0072B2", "Female" = "#D55E00")
+  ) +
+  scale_x_continuous(
+    breaks = c(0, 6, 12, 18, 24),
+    limits = c(0, 24)
+  ) +
+  labs(
+    title = "Activity patterns over a 24-hour day",
+    subtitle = "Faint lines show minute-level group means; bold lines show smooth trends",
+    x = "Hour of day (0 = midnight)",
+    y = "Mean minute-level MIMS",
+    color = "Sex"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+Across all education groups, mean activity is lowest overnight, increases sharply in the morning, remains elevated during the daytime, and declines in the evening. In the less-than-high-school group, men and women have fairly similar daytime patterns, with a late-morning peak. Women generally show higher daytime activity than men in the high-school-equivalent and more-than-high-school groups; the difference is particularly sustained in the more-than-high-school group. These are descriptive comparisons and do not account for differences in age or other participant characteristics.
+
 ## Problem 3
