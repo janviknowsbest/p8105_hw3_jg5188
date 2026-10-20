@@ -10,7 +10,52 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ## Problem 1
+```{r load-noaa}
+library(p8105.datasets)
+data("ny_noaa")
 
+dim(ny_noaa)
+str(ny_noaa)
+head(ny_noaa)
+```
+#now I shall check missing values
+```{r noaa-missingness}
+data.frame(
+  variable = names(ny_noaa),
+  missing_n = colSums(is.na(ny_noaa)),
+  missing_percent = round(
+    100 * colMeans(is.na(ny_noaa)), 1
+  )
+)
+```
+The Station IDs and dates are complete, however the missingness varies across weather measurements. The temprature analyses exclude many records because almost 44% of the temprature observations are missing.This table does not reveal why that is or whether missingness differs across stations or years.
 ## Problem 2
+### Data cleaning
 
+```{r clean-noaa}
+library(tidyverse)
+
+noaa_clean = ny_noaa |>
+  mutate(
+    year = lubridate::year(date),
+    month = lubridate::month(date),
+    day = lubridate::day(date),
+    tmax = as.numeric(tmax) / 10,
+    tmin = as.numeric(tmin) / 10,
+    prcp = prcp / 10
+  )
+
+glimpse(noaa_clean)
+```
+```{r common-snowfall}
+noaa_clean |>
+  filter(!is.na(snow)) |>
+  count(snow, sort = TRUE) |>
+  slice_head(n = 10) |>
+  knitr::kable(
+    col.names = c("Snowfall (mm)", "Number of observations"),
+    caption = "Ten most frequently observed snowfall values"
+  )
+```
+The most commonly observed snowfall value is 0 mm. It has 2008508 observations which shows the most recorded station-days had no snowfall. The most frequent positive valaues include 25, 13, 51, and 76 mm. The amounts are about 1,0.5,2, and 3 inches - respectively. This suggests that measurements originally recorded in inches were converted and rounded to mm. This is consistent with the US snowfall reporting practices that measure new snowfall to the nearest tenth of an inch.
 ## Problem 3
