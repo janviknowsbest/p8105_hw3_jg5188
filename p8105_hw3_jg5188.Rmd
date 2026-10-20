@@ -1,0 +1,16 @@
+---
+title: "hw 3 :)"
+author: "jg5188"
+date: "2026-10-20"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Problem 1
+
+## Problem 2
+
+## Problem 3
